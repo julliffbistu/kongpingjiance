@@ -1,0 +1,224 @@
+
+#include "putText.h"
+#include "MySerial.h"
+#include"opencv2/opencv.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+#include <iostream>
+
+int Damaged_quantity_number = 0, impurity_quantity_number = 0;
+float  outer_circular_degree = 0,inner_circular_degree = 0;
+#define PI 3.1415926
+using namespace cv;
+using namespace std;
+
+
+void mergeImg(Mat &dst,Mat &src1,Mat &src2)
+{
+	resize(src1 ,src1,Size(src1.cols/3,src1.rows/3), 0, 0, INTER_LINEAR);
+	resize(src2, src2,Size(src1.cols,src1.cols),0, 0, INTER_LINEAR);
+	int rows = src1.rows+5+src2.rows;
+	int cols = src1.cols+5+src2.cols;
+	CV_Assert(src1.type () == src2.type ());
+	dst.create (rows*1.2+50,cols*1.5,src2.type ());
+	dst.setTo(cv::Scalar(0, 0, 250));
+
+
+	src1.copyTo (dst(Rect(30,60,src1.cols,src1.rows)));
+	src2.copyTo (dst(Rect(30,src1.rows+110,src2.cols,src2.rows)));
+}
+
+int main()
+{
+	Serial_open(_T("COM3"),9600);
+	//double Time = (double)cvGetTickCount();
+	while(1)
+			{
+	double Time = (double)cvGetTickCount();
+	Mat IMG=imread("C:\\Users\\zhulifu\\Desktop\\sanpai\\ceshi8.bmp");   ////,6,8需要需要限制为3，瓶子摆放有问题。摆正则没事。
+	Mat img = imread("C:\\Users\\zhulifu\\Desktop\\sanpai\\pingdi\\pingdi2.bmp");//原图 
+	Mat image_roi, gray, threshold_out, cimage, cvtColor_output,threshold_output, out_image;
+	int height = IMG.rows;
+	int width = IMG.cols;
+	int height_high = img.rows;
+	int width_high = img.cols;
+	
+	float INNERCircle_radius,OUTCircle_radius;
+	Point center;
+	Size axes;
+	vector<vector<Point>> contours;
+	vector<Vec4i> hierarchy;
+	
+
+	if (!img.data && !IMG.data )
+		{
+			printf("请检查有没有该图片\n");
+			return false;
+		}
+		
+		Rect rect2(350,150, 850,850);  //1,2位数是起点，三四号位是跨度、、、、需要标定
+		image_roi = IMG(rect2);
+		//imshow("jieququyu",image_roi);
+	
+		
+		if (!image_roi.data == 0)
+			{
+			cvtColor(image_roi,gray,CV_BGR2GRAY);      //把image转换成灰度放到gray中
+			threshold( gray, threshold_out, 170, 255, CV_THRESH_BINARY );    //二值化结果影响椭圆检测 
+			//imshow("qqwqwq",threshold_out);
+			
+			float midel_radius = 0,large_radius = 0, small_radius = 0;
+			findContours(threshold_out, contours, hierarchy, CV_RETR_TREE, CHAIN_APPROX_SIMPLE, Point(0, 0));
+			cimage  = Mat::zeros(threshold_out.size(), CV_8UC3);
+			for(size_t i = 0; i < contours.size(); i++)
+			{
+				size_t count = contours[i].size();//拟合的点至少为6
+				if( count < 550 )   //去掉椭圆小于一定数量的圆,需调整
+					continue;
+				RotatedRect box = fitEllipse(contours[i]);//椭圆拟合
+				center.x = cvRound(box.center.x);     /*确定椭圆box的值center、size、angle*/
+				center.y = cvRound(box.center.y);
+
+				axes.width = cvRound(box.size.width*0.5);
+				axes.height = cvRound(box.size.height*0.5);
+				box.angle = -box.angle;
+
+				if(abs(axes.width-axes.height)<3)         //拟合多个圆，设定长短轴条件确定需要的圆2个，求这两个圆的长短轴并输出
+				{
+					drawContours(cimage , contours, (int)i, Scalar::all(255), 1, 8);
+					ellipse(image_roi , box, Scalar(0,0,255), 4, CV_AA);
+					//imshow("拟合椭圆结果", image_roi );
+					//printf("中心位置：x=%d,y=%d\n",axes.width,axes.height);
+					
+					midel_radius = (axes.width+axes.height)/2;
+					cout<<"圆的半径为 ："<<midel_radius<<endl;
+					float A_area = PI*axes.width*axes.height;
+					float A_length = 2*PI*axes.height+4*(abs(axes.width-axes.height));
+					float circular_degree = (4*PI*A_area)/(A_length*A_length);
+					cout<<"圆度为："<<circular_degree<<endl;
+
+					if(midel_radius >240 && midel_radius<270)               //根据相机高度调节的参数，需要标定huantujiugai
+					{
+						small_radius= midel_radius;
+						inner_circular_degree = circular_degree;
+					}
+					else if(midel_radius > 270)
+					{
+						large_radius= midel_radius;
+						outer_circular_degree = circular_degree;
+					}
+
+					cout<<"-------------------------------------区分两个椭圆参数-----------------------------------------\n"<<endl;
+				}
+			}
+			cout<<"small is :"<<small_radius<<"\n"<<"large is :"<<large_radius<<"\n"<<endl;
+			//------------------------------------------------求内外径-------------------------------------------------------------
+			if (small_radius == 0 || large_radius == 0 )
+			{
+				printf("this is a broken bottle !");
+				Damaged_quantity_number++;
+				Serial_write("11",sizeof("aa")-1);
+			}
+			else
+			{
+				float INNERstanderd_bottle_r = 17.6,OUTstanderd_bottle_r = 25.6;
+				float pixcel_area =  0.04339; //标定
+				 INNERCircle_radius =small_radius*pixcel_area*2 - 3.5743;
+				 OUTCircle_radius =large_radius*pixcel_area*2; //标定的值
+				cout<<"内圆的半径为 ："<<inner_circular_degree<<endl;
+				cout<<"外圆的半径为 ："<<outer_circular_degree<<endl;
+
+			}
+		}
+printf("**************************  瓶口检测完毕*********************************");/////////////////////////////////	
+
+		if(!img.data == 0)
+		{
+			Rect rect(280,250, 950,750);  //1,2位数是起点，三四号位是跨度
+			img = img(rect);//
+			//imshow("yuantu",img);
+
+			cvtColor(img, cvtColor_output, CV_BGR2GRAY);
+			threshold(cvtColor_output, threshold_output, 200, 255, CV_THRESH_BINARY);  //100参数修改，调节二值化参数
+			//imshow("threshold_output",threshold_output);
+			bitwise_not(threshold_output,threshold_output);
+			//imshow("threshold_output1",threshold_output);
+
+			findContours(threshold_output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_NONE);
+			//cout << "num=" << contours.size() << endl;
+			double area = 0;
+			int i;
+			double area_max = contourArea(contours[0]);
+			//cout<<"-----------"<<area_max<<endl;
+			for (i = 0; i<contours.size(); i++)
+			{
+				drawContours(img, contours, i, Scalar(0, 0, 255), 4, 8);
+				area = contourArea(contours[i]);//计算第i个轮廓的面积
+				//cout<<"area"<<area<<endl;
+				if (area_max > area)
+				{
+					area_max = area_max;
+				}
+				else
+				{
+					area_max = contourArea(contours[i]);
+				}
+			}
+			cout<<"\n area_max is :"<<area_max<<endl;
+
+			if (area_max > 2000)
+			{
+				printf("There has impurity at the bottom of the bottle.");
+				impurity_quantity_number++;
+				Serial_write("00",sizeof("aa")-1);
+			}
+			else
+			{
+				printf("There is no impurity at the bottom of the bottle.\n");	
+				
+			}
+		}
+		//imshow("dst", img);
+		//imshow("dst1", image_roi);
+		mergeImg (out_image,img,image_roi);
+		
+		putTextZH(out_image, "中 国 科 学 院 自 动 化 研 究 所", Point(270, 20), Scalar(0, 255, 0), 30, "楷体");
+		putTextZH(out_image, "瓶  底  检  测  图", Point(65, 320), Scalar(0, 255, 0), 26, "宋体");
+		putTextZH(out_image, "瓶  口  检  测  图", Point(65, 683), Scalar(0, 255, 0), 26, "宋体");
+		putTextZH(out_image, "瓶  底  检  测  图", Point(550, 70), Scalar(0, 0, 0), 26, "宋体");
+		putTextZH(out_image, "瓶  口  检  测  图", Point(550, 360), Scalar(0, 0, 0), 26, "宋体");
+		
+		putTextZH(out_image, "-----------------------------------------", Point(380, 327), Scalar(255, 255, 255), 26, "宋体");
+		putTextZH(out_image, "内圆半径：", Point(500, 407), Scalar(0, 0, 0), 18, "宋体");
+		putTextZH(out_image, "外圆半径：", Point(700, 407), Scalar(0, 0, 0), 18, "宋体");
+		putTextZH(out_image, "杂质数量：", Point(500,127), Scalar(0, 0, 0), 18, "宋体");
+		putTextZH(out_image, "破损数量：", Point(500,457), Scalar(0, 0, 0), 18, "宋体");
+		putTextZH(out_image, "内圆圆度：", Point(500, 507), Scalar(0, 0, 0), 18, "宋体");
+		putTextZH(out_image, "外圆圆度：", Point(700, 507), Scalar(0, 0, 0), 18, "宋体");
+
+		char buf[256];
+		sprintf_s(buf,256,"%.2f",INNERCircle_radius);
+		putText(out_image,buf,Point(600,420),CV_FONT_HERSHEY_PLAIN ,1,Scalar(0,0,0),2,8);
+
+		sprintf_s(buf,256,"%.2f",OUTCircle_radius);
+		putText(out_image,buf,Point(800,420),CV_FONT_HERSHEY_PLAIN ,1,Scalar(0,0,0),2,8);
+		
+		sprintf_s(buf,256,"%d",Damaged_quantity_number);
+		putText(out_image,buf,Point(600,140),CV_FONT_HERSHEY_PLAIN ,1,Scalar(0,0,0),2,8);
+		sprintf_s(buf,256,"%d",impurity_quantity_number);
+		putText(out_image,buf,Point(600,470),CV_FONT_HERSHEY_PLAIN ,1,Scalar(0,0,0),2,8);
+
+		sprintf_s(buf,256,"%f",inner_circular_degree);
+		putText(out_image,buf,Point(600,520),CV_FONT_HERSHEY_PLAIN ,1,Scalar(0,0,0),2,8);  //圆度
+		sprintf_s(buf,256,"%f",outer_circular_degree);
+		putText(out_image,buf,Point(800,520),CV_FONT_HERSHEY_PLAIN ,1,Scalar(0,0,0),2,8);  //圆度
+
+		//putTextZH(out_image, "瓶  口  nei", Point(65, 683), Scalar(0, 255, 0), 26, "宋体");
+		//putTextZH(out_image, "楷体字体换...\n行，斜体，下划线，显示!", Point(50, 200), Scalar(128, 255, 0), 30, "楷体", true, true);
+
+		imshow("中 国 科 学 院 自 动 化 研 究 所",out_image);
+		waitKey(1);
+		cout<<"-------------------------------结束-----------------------------------\n"<<endl;
+		Time = (double)cvGetTickCount() - Time ;
+		printf( "run time = %gms\n", Time /(cvGetTickFrequency()*1000) );
+	}
+}

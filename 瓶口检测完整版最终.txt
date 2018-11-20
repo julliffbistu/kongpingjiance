@@ -1,0 +1,226 @@
+#include"opencv2/opencv.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+#include <cxcore.h>
+#include <highgui.h>
+#include <math.h>
+#include <cv.h>
+#include <stdio.h>
+#define PI 3.1415926
+
+using namespace std;
+using namespace cv;
+
+int main( int argc, char** argv ) 
+{
+	/****************1.读取图像和图像预处理****************/
+
+	float brokenbottle_rate;
+	argv[1]="bottle2.bmp";  /*读入图像,分别输入seal1,seal2和coin1,并更改下列两处参数值*/
+
+	IplImage* image = cvLoadImage(argv[1]);
+	IplImage* gray;/*保存灰度图*/
+	IplImage* result;/*保存结果*/
+
+	gray=cvCreateImage(cvSize(image->width,image->height),IPL_DEPTH_8U,1);  /*创建输出图像，位无符号深度，通道*/
+	result=cvCreateImage(cvSize(image->width,image->height),IPL_DEPTH_8U,1);  /*创建输出图像，位无符号深度，通道*/
+
+	cvZero(result);
+
+	CvMemStorage* storage=cvCreateMemStorage(0);
+	CvSeq *contour; 
+
+	int count;
+	CvPoint *PointArray;
+	CvPoint center;
+	CvPoint2D32f *PointArray2D32f;
+
+	/* 创建动态结构序列*/
+	storage = cvCreateMemStorage(0);
+	contour = cvCreateSeq(CV_SEQ_ELTYPE_POINT,sizeof(CvSeq),sizeof(CvPoint),storage);
+	CvBox2D *box;
+	CvSize size;
+
+	/****************2.将图像转换为二值图像****************/
+
+	cvCvtColor(image,gray,CV_BGR2GRAY);      /*把image转换成灰度放到gray中*/
+	cvSmooth(gray,gray);
+	cvThreshold( gray, gray, 100, 255, CV_THRESH_BINARY );      /*将灰度图像二值化,需要针对输入图像进行调整,seal1时对应(195, 255),seal2时对应(190, 255),coin1时对应(70, 200)*/
+
+	//Mat element = getStructuringElement(MORPH_RECT,Size(3,3));
+	//cvErode(gray,gray,3);
+
+	//cvShowImage("二值化图",gray);
+	/****************3.抽取图像中对象的轮廓属性****************/
+	//cvCanny(gray,gray,3,9,3);
+	cvFindContours( gray, storage, &contour, sizeof(CvContour),CV_RETR_LIST, CV_CHAIN_APPROX_SIMPLE);  /*找轮廓*/
+	/*遍历每个轮廓*/
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	float midel_radius = 0;
+	float large_radius = 0, small_radius = 0;   //内外圆半径
+	for(;contour;contour=contour->h_next)
+	{
+		count=contour->total;
+		if(count<150)        /*去掉轮廓小于一定数值的圆,要根据输入图像进行调整,seal1时对应250,seal2时对应160,coin1时对应75*/
+			continue;
+		// Alloc memory for contour point set.  
+		PointArray = (CvPoint*)malloc( count*sizeof(CvPoint) );
+		PointArray2D32f= (CvPoint2D32f*)malloc( count*sizeof(CvPoint2D32f) );
+
+		// Alloc memory for ellipse data.
+		box = (CvBox2D32f*)malloc(sizeof(CvBox2D32f));
+		/*格式转化，contour -- PointArray -- PointArray2D32f*/
+		cvCvtSeqToArray(contour, PointArray, CV_WHOLE_SEQ); 
+		for(int i=0;i<count;i++)
+		{
+			PointArray2D32f[i].x=(float)PointArray[i].x;
+			PointArray2D32f[i].y=(float)PointArray[i].y;
+		}
+
+		/****************4.椭圆拟合****************/
+		cvFitEllipse(PointArray2D32f, count, box);  /*拟合椭圆*/
+
+		center.x = cvRound(box->center.x);     /*确定椭圆box的值center、size、angle*/
+		center.y = cvRound(box->center.y);
+		size.width = cvRound(box->size.width*0.5);
+		size.height = cvRound(box->size.height*0.5);
+		box->angle = -box->angle;
+		
+		if(abs(size.width-size.height)<3)         //拟合多个圆，设定长短轴条件确定需要的圆2个，求这两个圆的长短轴并输出
+		{
+			cvDrawContours(gray,contour,CV_RGB(255,255,255),CV_RGB(255,255,255),0,1,8,cvPoint(0,0)); /*画轮廓*/
+			//cvShowImage("dddd",gray);
+			cvEllipse(image,center,size,box->angle,0,360,CV_RGB(255,0,0),1,CV_AA,0);   /*画椭圆到result*/
+			cvShowImage("dddd",image);
+			/****************5.输出结果*********************/
+			printf("中心位置：x=%d,y=%d\n",center.x,center.y);  /*输出中心位置*/
+			printf("半径或长短(半)轴长度：w=%d,h=%d\n",size.width,size.height);  /*输出半径或长短轴长度*/
+
+			midel_radius = (size.width+size.height)/2;
+			cout<<"中间半径为 ："<<midel_radius<<endl;
+			float A_area = PI*size.width*size.height;
+			float A_length = 2*PI*size.height+4*(abs(size.width-size.height));
+			float  circular_degree = (4*PI*A_area)/(A_length*A_length);
+			cout<<"圆度为："<<circular_degree<<endl;
+			if(midel_radius<180)              //根据相机高度调节的参数，需要标定
+				{
+					small_radius= midel_radius;
+				}
+			else
+				{
+				large_radius= midel_radius;
+				}
+		printf("-------------------------------画分割线---------------------------------\n");
+		}
+	}
+		/////////////////////////////////////////////////////////////////////////////////////////////////////////
+			/*不同圆或椭圆数据输出分割线*/
+			//------------------------------------------求破损----------------------------------------------------------------------------
+			//cvShowImage("tuxiang",image);
+			Mat threshold_outputtwo;//二值图
+			Mat Img = cvarrToMat(image);
+			//imshow("zhuanhuanhou",Img);
+			Mat dst_xiao = Mat::zeros(Img.size(), Img.type());
+			Mat mask_xiao = Mat::zeros(Img.size(),CV_8U);
+			Mat dst_da = Mat::zeros(Img.size(), Img.type());
+			Mat mask_da = Mat::zeros(Img.size(),CV_8U);
+			Point circleCenter(center.x, center.y);
+			float large_area;
+			cout<<"small_radius is:"<<small_radius<<endl;
+			cout<<"large_radius is:"<<large_radius<<endl;
+			//------------------------------------------ 判断圆的内外口径大小----------------------------------------------------------------------------
+			
+			float INNERstanderd_bottle_r = 9.5,OUTstanderd_bottle_r = 11.5;     //标准瓶口尺寸和上下偏差
+			
+			float UPDOWN_deflection = 0.2; 
+			float pixcel_area =  0.06;     //standerd_bottle_r/((size.width+size.height)/2);计算修改设定参数
+			float pixel_number = UPDOWN_deflection/pixcel_area;
+			cout<<"pixel_number is ："<<pixel_number<<endl;
+			float INNERCircle_radius =small_radius*pixcel_area;
+			float OUTCircle_radius =large_radius*pixcel_area;
+			cout<<"内圆的半径为 ："<<INNERCircle_radius<<endl;
+			cout<<"外圆的半径为 ："<<OUTCircle_radius<<endl;
+
+			if(INNERCircle_radius>INNERstanderd_bottle_r+0.2 || INNERCircle_radius<INNERstanderd_bottle_r-0.2)
+			{
+				cout<<"the bottle INNERCircle_radius is unregulr for INNERstanderd_bottle_r  "<<endl;
+				return 0;
+			}
+			if(OUTCircle_radius>OUTstanderd_bottle_r+0.2 || OUTCircle_radius<OUTstanderd_bottle_r-0.2)
+			{
+				cout<<"the bottle OUTCircle_radius is unregulr for OUTstanderd_bottle_r"<<endl;
+				return 0;
+			}
+
+			circle(mask_xiao, circleCenter, small_radius+6, Scalar(255),-1);  //圆的半径可调节参数  略大一点好
+			Img.copyTo(dst_xiao, mask_xiao);
+			circle(mask_da, circleCenter, large_radius-6, Scalar(255),-1);//圆的半径可调节参数  略小一点好
+			Img.copyTo(dst_da, mask_da);
+			Mat dst = dst_da - dst_xiao;
+			//imshow("mask",mask);
+			//imshow("image",Img);
+			imshow("dst",dst);
+			//------------------------------------------求得圆环，其次做二值化求面积-----------------------------------------------------
+
+			threshold(dst, threshold_outputtwo, 10, 255, CV_THRESH_BINARY);
+			imshow("erzhihuatu",threshold_outputtwo);
+			//cout<<threshold_outputtwo<<endl;
+			//for(int i = 0;i<threshold_outputtwo.,i++)
+			large_area = PI*(large_radius*large_radius-small_radius*small_radius);
+			//cout<<"mianji:"<<large_area<<endl;
+
+			//-----------------------------------------------计算区域面积-----------------------------------------------------------------
+			Canny(threshold_outputtwo, threshold_outputtwo, 300, 900, 3);
+
+			vector<vector<Point>> contours;
+			vector<Vec4i> hierarchy;
+			findContours(threshold_outputtwo, contours, hierarchy, CV_RETR_CCOMP, CHAIN_APPROX_SIMPLE, Point(0, 0));
+			//绘制轮廓
+			for (int i = 0; i < (int)contours.size(); i++)
+			{
+				Scalar color(rand() & 255, rand() & 255, rand() & 255);
+				drawContours(threshold_outputtwo, contours, i, Scalar(255), 1, 8,hierarchy);
+			}
+
+			imshow("【处理后的图像】", threshold_outputtwo);
+
+			float endg_dConArea = 0;
+			//计算轮廓的面积
+			for (int i = 0; i < (int)contours.size(); i++)
+			{
+				double g_dConArea = contourArea(contours[i], true);
+				//	cout << "【用轮廓面积计算函数计算出来的第" << i << "个轮廓的面积为：】" << g_dConArea << endl;
+				//--------------------------------------确定面积大小，半段瓶口破损与否----------和所占破损比例-------------------------------
+				if(abs(g_dConArea)>50)   //15为可调价参数，修改破损所占面积大小
+				{
+					endg_dConArea =endg_dConArea+abs(g_dConArea);
+				}
+			}
+		//	cout<<"轮廓面积为:"<<endg_dConArea<<endl;
+			brokenbottle_rate = endg_dConArea/large_area*100;
+			//cout<<"This is a broken bottle!\n"<<"broken rate is："<<brokenbottle_rate<<"%"<<endl;
+			//return brokenbottle_rate;
+		//}
+		//printf("---------------------------------------------------------------------\n");
+
+		/*释放空间*/  
+		free(PointArray);
+		free(PointArray2D32f);
+		free(box);
+//}
+       if(brokenbottle_rate !=0)
+		{
+			cout<<"This is a broken bottle!\n"<<"broken rate is："<<brokenbottle_rate<<"%"<<endl;
+		}
+		else
+		{
+			cout<<"This is a standard bottle!\n"<<endl;
+		} 
+	// Wait for a key stroke; the same function arranges events processing   
+	cvWaitKey(0);
+	cvReleaseImage(&image);//释放图片资源
+	cvReleaseImage(&result);
+
+	cvDestroyWindow("原图");//销毁窗口
+	cvDestroyWindow("拟合");
+	return 0; 
+}

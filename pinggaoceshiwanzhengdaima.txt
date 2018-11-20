@@ -1,0 +1,68 @@
+
+#include"opencv2/opencv.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+#include <iostream>
+using namespace cv;
+using namespace std;
+
+int main()
+{
+	Mat img = imread("333.jpg");//原图
+	if (!img.data)
+	{
+		printf("请检查有没有该图片\n");
+		return false;
+	}
+	imshow("yuantu",img);
+	Mat cvtColor_output;//灰度图
+	cvtColor(img, cvtColor_output, CV_BGR2GRAY);
+	Mat threshold_output;//二值图
+	threshold(cvtColor_output, threshold_output, 90, 255, CV_THRESH_BINARY);  //100参数修改，调节二值化参数
+	imshow("二值化结果",threshold_output);
+	
+	//blur(threshold_output,threshold_output,Size(3,3));
+	//imshow("blurzhihou",threshold_output);
+	
+	Mat edges;
+	Canny(threshold_output,edges,1, 5,5);
+	imshow("Canny",edges);
+	//cout<<edges<<endl;
+//----------------------------------------卓行扫描-----------------------------------------------------------
+	
+	//瓶子瓶口边缘点数
+	for (int i = 0;i<edges.rows;i++)
+	{
+		int acount=0;
+		for (int j = 0;j<edges.cols;j++)
+		{
+			if(edges.at<uchar>(i,j) == 255) 
+			{
+					acount++;
+		
+			}
+		
+					if(acount>70)
+					{
+						cout<<"点的数量为"<<acount<<endl;
+						cout<<"行号为："<<i<<endl;
+//----------------------------------------判断瓶子高低------------------------------------------------------------------------------						
+						int bottle_height_regularsize = 41;//标定瓶口高度像素和像原尺寸  高度误差不超于正负1mm
+						int bottle_errorsize= 0.5; //1mm所占的像素值        
+						if (i<(bottle_height_regularsize-bottle_errorsize))
+						{
+							printf("This bottle is lower than the standard bottle\n");
+						}
+						else if(i>(bottle_height_regularsize+bottle_errorsize))
+						{
+							printf("This bottle is taller than the standard bottle\n");
+						}
+						else
+						{
+							printf("This bottle is a standard bottle\n");
+						}
+//--------------------------------------瓶子高低判断结束-------------------------------------------------------------------------------						
+						return 0;
+					}
+		}		
+	}
+}
